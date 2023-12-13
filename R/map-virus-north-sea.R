@@ -9,6 +9,7 @@ library(ggplot2)
 library(raster)
 library(ggspatial)
 library(rerddap)
+library(RNetCDF)
 
 # Set stations
 stations <- read.csv("./data/raw/PE477_PE486_cruise_coordinates.csv", sep = ";") %>% sf::st_as_sf(
@@ -34,6 +35,38 @@ stations <- subset(stations, stations$name != "PE486-7")
 frame <- st_as_sfc("MULTIPOLYGON (((-0.391711 53.22202, -0.391711 55.71748, 4.617073 55.71748, 4.617073 53.22202, -0.391711 53.22202)))", crs = 4326)
 bbox <- st_bbox(frame)
 bbox_url <- paste0(bbox, collapse = ",")
+
+# Get Currents by editing the netcdf file
+# Previously downloaded from Copernicus - need to automatize
+cur <- open.nc("./data/raw/cmems_mod_glo_phy-cur_anfc_0.083deg_P1M-m_1702481350907.nc", write = TRUE)
+print.nc(cur)
+
+# Calculate current direction in degrees
+calc_dir <-function(vo, uo) (atan2(vo, uo) * (180 / pi)) + 180
+current_direction <- calc_dir(
+  var.get.nc(cur, "vo"),
+  var.get.nc(cur, "uo")
+)
+
+# Add missing dimensions
+dim(current_direction) <- c(dim(current_direction), 1, 1)
+
+# Create variable and put data
+var.def.nc(cur, varname = "dir", vartype = "NC_DOUBLE",
+           dimensions = c("longitude", "latitude", "depth", "time"))
+att.put.nc(cur, "dir", name = "standard_name", type = "NC_CHAR", value = "sea_water_velocity_to_direction")
+att.put.nc(cur, "dir", name = "long_name", type = "NC_CHAR", value = "Direction of Sea Water")
+att.put.nc(cur, "dir", name = "units", type = "NC_CHAR", value = "degree")
+var.put.nc(cur, "dir", data = current_direction)
+
+# Inspect and close
+print.nc(cur)
+sync.nc(cur)
+close.nc(cur)
+
+# Open as raster
+cur <- rast("./data/raw/cmems_mod_glo_phy-cur_anfc_0.083deg_P1M-m_1702481350907.nc")
+cur <- cur$`dir_depth=0.49402499`
 
 # Get coastline
 wfs <- WFSClient$new("https://geo.vliz.be/geoserver/MarineRegions/wfs", "1.0.0")
